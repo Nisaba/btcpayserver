@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Data;
@@ -14,6 +14,8 @@ public class PayoutWebhookProvider(
     BTCPayNetworkJsonSerializerSettings btcPayNetworkJsonSerializerSettings)
     : WebhookProvider<PayoutEvent>(eventAggregator, logger, webhookSender)
 {
+    public override bool SupportsCustomerEmail { get; } = false;
+
     protected override WebhookSender.WebhookDeliveryRequest CreateDeliveryRequest(PayoutEvent payoutEvent, WebhookData webhook)
     {
         var webhookBlob = webhook?.GetBlob();

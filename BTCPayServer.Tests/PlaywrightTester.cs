@@ -9,12 +9,14 @@ using BTCPayServer.Abstractions.Extensions;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Blazor.VaultBridge.Elements;
 using BTCPayServer.Client.Models;
+using BTCPayServer.Data;
 using BTCPayServer.Lightning;
 using BTCPayServer.Lightning.CLightning;
 using BTCPayServer.Views.Manage;
 using BTCPayServer.Views.Server;
 using BTCPayServer.Views.Stores;
 using BTCPayServer.Views.Wallets;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Playwright;
 using NBitcoin;
@@ -373,6 +375,14 @@ namespace BTCPayServer.Tests
         public async Task AddDerivationScheme(string cryptoCode = "BTC",
             string derivationScheme = "tpubD6NzVbkrYhZ4XxNXjYTcRujMc8z8734diCthtFGgDMimbG5hUsKBuSTCuUyxWL7YwP7R4A5StMTRQiZnb6vE4pdHWPgy9hbiHuVJfBMumUu-[legacy]")
         {
+            if (cryptoCode != "BTC" && derivationScheme ==
+                "tpubD6NzVbkrYhZ4XxNXjYTcRujMc8z8734diCthtFGgDMimbG5hUsKBuSTCuUyxWL7YwP7R4A5StMTRQiZnb6vE4pdHWPgy9hbiHuVJfBMumUu-[legacy]")
+            {
+                derivationScheme = new BitcoinExtPubKey("tpubD6NzVbkrYhZ4XxNXjYTcRujMc8z8734diCthtFGgDMimbG5hUsKBuSTCuUyxWL7YwP7R4A5StMTRQiZnb6vE4pdHWPgy9hbiHuVJfBMumUu", Network.RegTest)
+                    .ToNetwork(NBitcoin.Altcoins.Litecoin.Instance.Regtest)
+                    .ToString()! + "-[legacy]";
+            }
+
             if (!(await Page.ContentAsync()).Contains($"Setup {cryptoCode} Wallet"))
                 await GoToWalletSettings(cryptoCode);
 
@@ -571,7 +581,10 @@ namespace BTCPayServer.Tests
             {
                 await MineBlockOnInvoiceCheckout();
             }
-            await Page.Locator("xpath=//*[text()=\"Invoice Paid\" or text()=\"Payment Received\"]").WaitForAsync();
+            if (amount is null)
+                await Page.Locator("xpath=//*[text()=\"Invoice Paid\" or text()=\"Payment Received\"]").WaitForAsync();
+            else
+                await Page.Locator("xpath=//*[text()=\"Invoice Paid\" or text()=\"Payment Received\" or text()=\"The invoice hasn't been paid in full.\"]").WaitForAsync();
         }
 
         /// <summary>
@@ -645,6 +658,12 @@ namespace BTCPayServer.Tests
 
             public Task BumpFee(uint256? txId = null) => Page.ClickAsync($"{TxRowSelector(txId)} .bumpFee-btn");
             static string TxRowSelector(uint256? txId = null) => txId is null ? ".transaction-row:first-of-type"  : $".transaction-row[data-value=\"{txId}\"]";
+
+            public async Task AssertRowContains(uint256 txId, string expected)
+            {
+                var text = await Page.InnerTextAsync(TxRowSelector(txId));
+                Assert.Contains(expected.NormalizeWhitespaces(), text.NormalizeWhitespaces());
+            }
 
             public Task AssertHasLabels(string label) => AssertHasLabels(null, label);
             public async Task AssertHasLabels(uint256? txId, string label)
@@ -727,6 +746,21 @@ namespace BTCPayServer.Tests
                 Assert.Equal(expected, actual);
             }
             public async Task Broadcast() => await page.ClickAsync("#BroadcastTransaction");
+        }
+
+        public async Task ClickViewReport()
+        {
+            await Page.ClickAsync("#view-report");
+            await Page.WaitForSelectorAsync("#raw-data-table");
+        }
+
+        public async Task<string> DownloadReportCSV()
+        {
+            var download = await Page.RunAndWaitForDownloadAsync(async () =>
+            {
+                await ClickPagePrimary();
+            });
+            return await new StreamReader(await download.CreateReadStreamAsync()).ReadToEndAsync();
         }
     }
 }
