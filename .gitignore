@@ -302,3 +302,8 @@ BTCPayServer/wwwroot/swagger/v1/openapi.json
 BTCPayServer/appsettings.dev.json
 BTCPayServer.Tests/monero_wallet
 /BTCPayServer.Tests/NewBlocks.bat
+/BTCPay-Console/BTCPay-Console.csproj
+/BTCPay-Console/Program.cs
+/BTCPayServer/wwwroot/vendor/summernote/summernote-bs5.js
+/BTCPayServer/wwwroot/vendor/summernote/summernote-bs5.js.map
+/btcpayserver.sln
