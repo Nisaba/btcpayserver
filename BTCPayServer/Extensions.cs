@@ -1,6 +1,5 @@
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
@@ -12,10 +11,14 @@ using System.Net.WebSockets;
 using System.Reflection;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Contracts;
+using BTCPayServer.Abstractions.Extensions;
+using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Abstractions.Services;
 using BTCPayServer.BIP78.Sender;
 using BTCPayServer.Configuration;
@@ -29,7 +32,6 @@ using BTCPayServer.NTag424;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.Bitcoin;
 using BTCPayServer.Payments.Lightning;
-using BTCPayServer.Payouts;
 using BTCPayServer.Security;
 using BTCPayServer.Services;
 using BTCPayServer.Services.Invoices;
@@ -37,10 +39,13 @@ using BTCPayServer.Services.Reporting;
 using BTCPayServer.Services.Wallets;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ViewFeatures;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using NBitcoin;
 using NBitcoin.Payment;
 using NBitcoin.RPC;
@@ -440,6 +445,14 @@ namespace BTCPayServer
 #pragma warning restore CS0618 // Type or member is obsolete
             return services;
         }
+        public static void AddSettingsAccessor<T>(this IServiceCollection services) where T : class, new()
+        {
+            services.TryAddSingleton<ISettingsAccessor<T>, SettingsAccessor<T>>();
+            services.AddSingleton<IHostedService>(provider => (SettingsAccessor<T>)provider.GetRequiredService<ISettingsAccessor<T>>());
+            services.AddSingleton<IStartupTask>(provider => (SettingsAccessor<T>)provider.GetRequiredService<ISettingsAccessor<T>>());
+            // Singletons shouldn't reference the settings directly, but ISettingsAccessor<T>, since singletons won't have refreshed values of the setting
+            services.AddTransient<T>(provider => provider.GetRequiredService<ISettingsAccessor<T>>().Settings);
+        }
         public static IServiceCollection AddReportProvider<T>(this IServiceCollection services)
     where T : ReportProvider
         {
@@ -448,11 +461,26 @@ namespace BTCPayServer
             return services;
         }
 
+        public static IServiceCollection AddScheduledDbScript(this IServiceCollection services, string name, string script)
+        {
+            services.AddTransient(s => new DbPeriodicTask.PeriodicScript(name, script));
+            return services;
+        }
+
         public static IServiceCollection AddScheduledTask<T>(this IServiceCollection services, TimeSpan every)
             where T : class, IPeriodicTask
         {
-            services.AddSingleton<T>();
+            services.TryAddSingleton<T>();
             services.AddTransient<ScheduledTask>(o => new ScheduledTask(typeof(T), every));
+            return services;
+        }
+
+        public static IServiceCollection AddMigration<TDbContext, TMigration>(this IServiceCollection services)
+            where TDbContext : DbContext
+            where TMigration : MigrationBase<TDbContext>
+        {
+            services.TryAddSingleton<IMigrationExecutor, MigrationExecutor<TDbContext>>();
+            services.AddSingleton<MigrationBase<TDbContext>, TMigration>();
             return services;
         }
 
@@ -849,6 +877,36 @@ namespace BTCPayServer
 
         public static string RemoveUserInfo(this Uri uri)
         => string.IsNullOrEmpty(uri.UserInfo) ? uri.ToString() : uri.ToString().Replace(uri.UserInfo, "***");
+
+        public static void SetStatusLoginResult(this ITempDataDictionary tempData, UserService.CanLoginContext loginContext)
+        {
+            if (!loginContext.Failures.Any())
+                throw new InvalidOperationException("No login failure found");
+            tempData.Remove(WellKnownTempData.SuccessMessage);
+            tempData.Remove(WellKnownTempData.ErrorMessage);
+            var model = new StatusMessageModel()
+            {
+                Severity = loginContext._user is null ? StatusMessageModel.StatusSeverity.Error : StatusMessageModel.StatusSeverity.Warning
+            };
+
+            List<string> failures = new();
+            foreach (var failure in loginContext.Failures)
+            {
+                StringWriter writer = new();
+                if (failure.Html is null)
+                {
+                    writer.Write(failure.Text.Value);
+                }
+                else
+                {
+                    failure.Html.WriteTo(writer, HtmlEncoder.Default);
+                }
+                failures.Add(writer.ToString());
+            }
+
+            model.Html = string.Join("<br/>", failures);
+            tempData.SetStatusMessageModel(model);
+        }
 
         public static DataDirectories Configure(this DataDirectories dataDirectories, IConfiguration configuration)
         {

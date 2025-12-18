@@ -100,8 +100,8 @@ namespace BTCPayServer.Controllers.Greenfield
                 return this.UserNotFound();
             }
 
-            var success = await _userService.ToggleUser(user.Id, request.Locked ? DateTimeOffset.MaxValue : null);
-            return success.HasValue && success.Value ? Ok() : this.CreateAPIError("invalid-state",
+            var success = await _userService.SetDisabled(user.Id, request.Locked);
+            return success is not UserService.SetDisabledResult.Error  ? Ok() : this.CreateAPIError("invalid-state",
                 $"{(request.Locked ? "Locking" : "Unlocking")} user failed");
         }
 
@@ -117,7 +117,7 @@ namespace BTCPayServer.Controllers.Greenfield
 
             if (user.RequiresApproval)
             {
-                var loginLink = _callbackGenerator.ForLogin(user, Request);
+                var loginLink = _callbackGenerator.ForLogin(user);
                 return await _userService.SetUserApproval(user.Id, request.Approved, loginLink)
                     ? Ok()
                     : this.CreateAPIError("invalid-state", $"User is already {(request.Approved ? "approved" : "unapproved")}");
@@ -413,14 +413,7 @@ namespace BTCPayServer.Controllers.Greenfield
                     await _settingsRepository.FirstAdminRegistered(policies, _options.UpdateUrl != null, _options.DisableRegistration, Logs);
                 }
             }
-            var currentUser = await _userManager.GetUserAsync(User);
-            var userEvent = currentUser switch
-            {
-                { } invitedBy => await UserEvent.Invited.Create(user, invitedBy, _callbackGenerator, Request, request.SendInvitationEmail is not false),
-                _ => await UserEvent.Registered.Create(user, _callbackGenerator, Request)
-            };
-            _eventAggregator.Publish(userEvent);
-
+            _eventAggregator.Publish(await UserEvent.Registered.Create(user, await _userManager.GetUserAsync(User), _callbackGenerator, request.SendInvitationEmail is not false));
             var model = await ForAPI(user);
             return CreatedAtAction(string.Empty, model);
         }
@@ -444,7 +437,7 @@ namespace BTCPayServer.Controllers.Greenfield
             }
 
             // User shouldn't be deleted if it's the only admin
-            if (await _userService.IsUserTheOnlyOneAdmin(user))
+            if (await _userService.IsUserTheOnlyOneAdmin(new (user, baseUrl: Request.GetRequestBaseUrl())))
             {
                 return Forbid(AuthenticationSchemes.GreenfieldBasic);
             }

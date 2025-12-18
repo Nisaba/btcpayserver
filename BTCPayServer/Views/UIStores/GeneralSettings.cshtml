@@ -1,4 +1,3 @@
-@using BTCPayServer.Abstractions.Models
 @using BTCPayServer.TagHelpers
 @using Microsoft.AspNetCore.Mvc.TagHelpers
 @using BTCPayServer.Abstractions.Contracts
@@ -6,13 +5,13 @@
 @inject IFileService FileService;
 @model GeneralSettingsViewModel
 @{
-	ViewData.SetActivePage(StoreNavPages.General, StringLocalizer["General"], Context.GetStoreData().Id);
+	ViewData.SetLayoutModel(new LayoutModel("General", StringLocalizer["General"]).SetCategory(WellKnownCategories.Store));
 	var canUpload = await FileService.IsAvailable();
 }
 <form method="post" enctype="multipart/form-data" permissioned="@Policies.CanModifyStoreSettings">
     <div class="sticky-header">
 		<h2 text-translate="true">Store Settings</h2>
-		<button id="page-primary" type="submit" class="btn btn-primary">Save</button>
+		<button id="page-primary" type="submit" class="btn btn-primary" text-translate="true">Save</button>
     </div>
 
     <partial name="_StatusMessage" />

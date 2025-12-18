@@ -9,12 +9,14 @@ using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Controllers;
 using BTCPayServer.Data;
+using BTCPayServer.HostedServices;
 using BTCPayServer.Hosting;
 using BTCPayServer.Models.AppViewModels;
 using BTCPayServer.Plugins.PointOfSale;
 using BTCPayServer.Plugins.PointOfSale.Controllers;
 using BTCPayServer.Plugins.PointOfSale.Models;
 using BTCPayServer.Services.Apps;
+using BTCPayServer.Tests.PMO;
 using BTCPayServer.Views.Stores;
 using LNURL;
 using Microsoft.AspNetCore.Mvc;
@@ -147,7 +149,7 @@ fruit tea:
         }
 
         [Fact]
-        [Trait("Integration", "Integration")]
+        [Trait("Playwright", "Playwright")]
         public async Task CanExportInvoicesWithMetadata()
         {
             await using var s = CreatePlaywrightTester();
@@ -196,6 +198,15 @@ fruit tea:
             var expiredInvoice = await client.GetInvoice(s.StoreId, expiredInvoiceId);
             Assert.Equal(InvoiceStatus.Expired, expiredInvoice.Status);
             Assert.Equal(InvoiceExceptionStatus.None, expiredInvoice.AdditionalStatus);
+
+            // Check that periodic task can delete the invoice
+            var periodicTask = s.Server.PayTester.GetService<DbPeriodicTask>();
+            var deleted = await periodicTask.RunScript("Invoice Cleanup");
+            Assert.Equal(0, deleted);
+            periodicTask.Now = DateTimeOffset.UtcNow.AddMonths(8);
+            deleted = await periodicTask.RunScript("Invoice Cleanup");
+            Assert.NotEqual(0, deleted);
+            await AssertEx.AssertApiError(404, "invoice-not-found", () => client.GetInvoice(s.StoreId, expiredInvoiceId));
 
             await s.GoToStore(s.StoreId);
             await s.CreateApp("PointOfSale");
@@ -387,7 +398,7 @@ goodies:
             // Create users
             var user = await s.RegisterNewUser();
             var userAccount = s.AsTestAccount();
-            await s.GoToHome();
+            await s.SkipWizard();
             await s.Logout();
             await s.GoToRegister();
             await s.RegisterNewUser(true);
@@ -720,12 +731,8 @@ goodies:
             await s.GoToInvoiceCheckout();
         }
 
-        private static async Task AssertInvoiceAmount(PlaywrightTester s, string expectedAmount)
-        {
-            var el = await s.Page.WaitForSelectorAsync("#AmountDue");
-            var content = await el!.TextContentAsync();
-            Assert.Equal(expectedAmount.NormalizeWhitespaces(), content.NormalizeWhitespaces());
-        }
+        private static Task AssertInvoiceAmount(PlaywrightTester s, string expectedAmount)
+            => new InvoiceCheckoutPMO(s).AssertContent(new() { AmountDue = expectedAmount });
 
         [Fact]
         [Trait("Playwright", "Playwright")]
@@ -737,7 +744,7 @@ goodies:
             // Create users
             var user = await s.RegisterNewUser();
             var userAccount = s.AsTestAccount();
-            await s.GoToHome();
+            await s.SkipWizard();
             await s.Logout();
             await s.GoToRegister();
             await s.RegisterNewUser(true);

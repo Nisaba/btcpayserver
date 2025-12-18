@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Net.Mime;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
@@ -443,7 +444,7 @@ namespace BTCPayServer.Controllers
                 switch (model.Command)
                 {
                     case "createpending":
-                        await _pendingTransactionService.CreatePendingTransaction(walletId.StoreId, walletId.CryptoCode, psbt);
+                        await _pendingTransactionService.CreatePendingTransaction(walletId.StoreId, walletId.CryptoCode, psbt, Request.GetRequestBaseUrl());
                         return RedirectToWalletList(walletId);
                     default:
                         // case "sign":
@@ -627,7 +628,7 @@ namespace BTCPayServer.Controllers
             model.Rates = GetCurrentStore().GetStoreBlob().GetTrackedRates().ToList();
 
             model.Labels.AddRange(
-                (await WalletRepository.GetWalletLabels(walletId))
+                (await WalletRepository.GetWalletLabelsByLinkedType(walletId, WalletObjectData.Types.Tx))
                 .Select(c => (c.Label, c.Color, ColorPalette.Default.TextColor(c.Color))));
 
             IList<TransactionHistoryLine>? transactions = null;
@@ -1289,10 +1290,13 @@ namespace BTCPayServer.Controllers
                 ChangeAddress = psbtResponse.ChangeAddress?.ToString(),
                 PSBT = psbt.ToHex()
             };
+
+            if (!psbt.IsReadyToSign() && command == "sign")
+                command = "analyze-psbt";
             switch (command)
             {
                 case "createpending":
-                    await _pendingTransactionService.CreatePendingTransaction(walletId.StoreId, walletId.CryptoCode, psbt);
+                    await _pendingTransactionService.CreatePendingTransaction(walletId.StoreId, walletId.CryptoCode, psbt, Request.GetRequestBaseUrl());
                     return RedirectToAction(nameof(WalletTransactions), new { walletId = walletId.ToString() });
                 case "sign":
                     return await WalletSign(walletId, new WalletPSBTViewModel
@@ -1512,9 +1516,9 @@ namespace BTCPayServer.Controllers
 
             var psbt = PSBT.Parse(viewModel.SigningContext.PSBT, network.NBitcoinNetwork);
 
-            if (!psbt.IsReadyToSign())
+            if (!psbt.IsReadyToSign(out var errors))
             {
-                ModelState.AddModelError(nameof(viewModel.SigningContext.PSBT), "PSBT is not ready to be signed");
+                ModelState.AddModelError(nameof(viewModel.SigningContext.PSBT), BuildErrorMessage(errors));
             }
 
             if (!ModelState.IsValid)
@@ -1578,6 +1582,27 @@ namespace BTCPayServer.Controllers
                 ReturnUrl = viewModel.ReturnUrl,
                 BackUrl = viewModel.BackUrl
             });
+        }
+
+        private static string BuildErrorMessage(PSBTError[] errors)
+        {
+            StringBuilder errorMessage = new();
+            errorMessage.Append("PSBT is not ready to be signed.");
+            if (errors.Length == 1)
+            {
+                errorMessage.Append($" ({errors[0]})");
+            }
+            else
+            {
+                errorMessage.AppendLine();
+                foreach (var error in errors.Take(5))
+                {
+                    errorMessage.AppendLine(error.ToString());
+                }
+            }
+            if (errors.Length > 5)
+                errorMessage.Append($"{errors.Length - 5} more errors...");
+            return errorMessage.ToString();
         }
 
         private WalletPSBTReadyViewModel.StringAmounts ValueToString(Money v, BTCPayNetworkBase network,
@@ -1892,20 +1917,49 @@ namespace BTCPayServer.Controllers
             return View(vm);
         }
 
-        [HttpPost("{walletId}/labels/{id}/remove")]
-        public async Task<IActionResult> RemoveWalletLabel(
+        [HttpPost("{walletId}/labels/{id}/delete")]
+        public async Task<IActionResult> DeleteWalletLabel(
             [ModelBinder(typeof(WalletIdModelBinder))]
             WalletId walletId, string id)
         {
             var labels = new[] { id };
-            ;
+            
             if (await WalletRepository.RemoveWalletLabels(walletId, labels))
             {
-                TempData[WellKnownTempData.SuccessMessage] = StringLocalizer["The label has been successfully removed."].Value;
+                TempData[WellKnownTempData.SuccessMessage] = StringLocalizer["The label has been successfully deleted."].Value;
             }
             else
             {
-                TempData[WellKnownTempData.ErrorMessage] = StringLocalizer["The label could not be removed."].Value;
+                TempData[WellKnownTempData.ErrorMessage] = StringLocalizer["The label could not be deleted."].Value;
+            }
+
+            return RedirectToAction(nameof(WalletLabels), new { walletId });
+        }
+
+        [HttpPost("{walletId}/labels/{id}/edit")]
+        public async Task<IActionResult> EditWalletLabel(
+            [ModelBinder(typeof(WalletIdModelBinder))]
+            WalletId walletId, string id, string newLabel)
+        {
+            if (string.IsNullOrWhiteSpace(newLabel))
+            {
+                TempData[WellKnownTempData.ErrorMessage] = StringLocalizer["Label name cannot be empty."].Value;
+                return RedirectToAction(nameof(WalletLabels), new { walletId });
+            }
+
+            newLabel = newLabel.Trim();
+            if (newLabel == id)
+            {
+                return RedirectToAction(nameof(WalletLabels), new { walletId });
+            }
+
+            if (await WalletRepository.RenameWalletLabel(walletId, id, newLabel))
+            {
+                TempData[WellKnownTempData.SuccessMessage] = StringLocalizer["The label has been successfully renamed."].Value;
+            }
+            else
+            {
+                TempData[WellKnownTempData.ErrorMessage] = StringLocalizer["The label could not be renamed."].Value;
             }
 
             return RedirectToAction(nameof(WalletLabels), new { walletId });

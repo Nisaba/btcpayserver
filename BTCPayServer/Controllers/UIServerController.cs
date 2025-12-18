@@ -9,6 +9,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
+using BTCPayServer.Abstractions;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Extensions;
@@ -21,7 +22,7 @@ using BTCPayServer.Models.ServerViewModels;
 using BTCPayServer.Models.StoreViewModels;
 using BTCPayServer.Services;
 using BTCPayServer.Services.Apps;
-using BTCPayServer.Services.Mails;
+using BTCPayServer.Plugins.Emails.Services;
 using BTCPayServer.Services.Stores;
 using BTCPayServer.Storage.Services;
 using BTCPayServer.Storage.Services.Providers;
@@ -29,6 +30,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Localization;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Hosting;
@@ -66,16 +68,18 @@ namespace BTCPayServer.Controllers
         private readonly IEnumerable<IStorageProviderService> _StorageProviderServices;
         private readonly CallbackGenerator _callbackGenerator;
         private readonly UriResolver _uriResolver;
-        private readonly EmailSenderFactory _emailSenderFactory;
         private readonly TransactionLinkProviders _transactionLinkProviders;
         private readonly LocalizerService _localizer;
+        private readonly EmailSenderFactory _emailSenderFactory;
         public IStringLocalizer StringLocalizer { get; }
+        public ViewLocalizer ViewLocalizer { get; }
 
         public UIServerController(
             UserManager<ApplicationUser> userManager,
             UserService userService,
             StoredFileRepository storedFileRepository,
             IFileService fileService,
+            EmailSenderFactory emailSenderFactory,
             IEnumerable<IStorageProviderService> storageProviderServices,
             BTCPayServerOptions options,
             SettingsRepository settingsRepository,
@@ -92,12 +96,12 @@ namespace BTCPayServer.Controllers
             Logs logs,
             CallbackGenerator callbackGenerator,
             UriResolver uriResolver,
-            EmailSenderFactory emailSenderFactory,
             IHostApplicationLifetime applicationLifetime,
             IHtmlHelper html,
             TransactionLinkProviders transactionLinkProviders,
             LocalizerService localizer,
             IStringLocalizer stringLocalizer,
+            ViewLocalizer viewLocalizer,
             BTCPayServerEnvironment environment
         )
         {
@@ -119,15 +123,16 @@ namespace BTCPayServer.Controllers
             _eventAggregator = eventAggregator;
             _externalServiceOptions = externalServiceOptions;
             Logs = logs;
+            _emailSenderFactory = emailSenderFactory;
             _callbackGenerator = callbackGenerator;
             _uriResolver = uriResolver;
-            _emailSenderFactory = emailSenderFactory;
             ApplicationLifetime = applicationLifetime;
             Html = html;
             _transactionLinkProviders = transactionLinkProviders;
             _localizer = localizer;
             Environment = environment;
             StringLocalizer = stringLocalizer;
+            ViewLocalizer = viewLocalizer;
         }
 
         [HttpGet("server/stores")]
@@ -919,7 +924,7 @@ namespace BTCPayServer.Controllers
                 return NotFound();
             return View("Confirm",
                 new ConfirmModel("Delete dynamic DNS service",
-                    $"Deleting the dynamic DNS service for <strong>{Html.Encode(hostname)}</strong> means your BTCPay Server will stop updating the associated DNS record periodically.", "Delete"));
+                    $"Deleting the dynamic DNS service for <strong>{Html.Encode(hostname)}</strong> means your BTCPay Server will stop updating the associated DNS record periodically.", StringLocalizer["Delete"]));
         }
 
         [HttpPost("server/services/dynamic-dns/{hostname}/delete")]
@@ -1054,7 +1059,7 @@ namespace BTCPayServer.Controllers
         [HttpGet("server/services/ssh/disable")]
         public IActionResult SSHServiceDisable()
         {
-            return View("Confirm", new ConfirmModel("Disable modification of SSH settings", "This action is permanent and will remove the ability to change the SSH settings via the BTCPay Server user interface.", "Disable"));
+            return View("Confirm", new ConfirmModel(StringLocalizer["Disable modification of SSH settings"], StringLocalizer["This action is permanent and will remove the ability to change the SSH settings via the BTCPay Server user interface."], StringLocalizer["Disable"]));
         }
 
         [HttpPost("server/services/ssh/disable")]
@@ -1076,6 +1081,7 @@ namespace BTCPayServer.Controllers
             var vm = new BrandingViewModel
             {
                 ServerName = server.ServerName,
+                BaseUrl = server.BaseUrl,
                 ContactUrl = server.ContactUrl,
                 CustomTheme = theme.CustomTheme,
                 CustomThemeExtension = theme.CustomThemeExtension,
@@ -1089,8 +1095,25 @@ namespace BTCPayServer.Controllers
         public async Task<IActionResult> Branding(
             BrandingViewModel vm,
             [FromForm] bool RemoveLogoFile,
-            [FromForm] bool RemoveCustomThemeFile)
+            [FromForm] bool RemoveCustomThemeFile,
+            [FromForm] string? command = null)
         {
+            if (command is "SetBaseUrl")
+                vm.BaseUrl = HttpContext.Request.GetRequestBaseUrl().ToString();
+            if (string.IsNullOrEmpty(vm.BaseUrl))
+            {
+                vm.BaseUrl = null;
+            }
+            else
+            {
+                if (!RequestBaseUrl.TryFromUrl(vm.BaseUrl, out var baseUrl))
+                    ModelState.AddModelError(nameof(vm.BaseUrl), StringLocalizer["Invalid Base URL"]);
+                vm.BaseUrl = baseUrl?.ToString();
+                vm.BaseUrl = vm.BaseUrl?.WithoutEndingSlash();
+            }
+
+            if (!ModelState.IsValid)
+                return View(vm);
             var settingsChanged = false;
             var server = await _SettingsRepository.GetSettingAsync<ServerSettings>() ?? new ServerSettings();
             var theme = await _SettingsRepository.GetSettingAsync<ThemeSettings>() ?? new ThemeSettings();
@@ -1113,6 +1136,11 @@ namespace BTCPayServer.Controllers
                 server.ContactUrl = !string.IsNullOrWhiteSpace(vm.ContactUrl)
                     ? vm.ContactUrl.IsValidEmail() ? $"mailto:{vm.ContactUrl}" : vm.ContactUrl
                     : null;
+                settingsChanged = true;
+            }
+            if (server.BaseUrl != vm.BaseUrl)
+            {
+                server.BaseUrl = vm.BaseUrl;
                 settingsChanged = true;
             }
 
@@ -1222,81 +1250,6 @@ namespace BTCPayServer.Controllers
             }
 
             return View(vm);
-        }
-
-        [HttpGet("server/emails")]
-        public async Task<IActionResult> Emails()
-        {
-            var email = await _emailSenderFactory.GetSettings() ?? new EmailSettings();
-            var vm = new ServerEmailsViewModel(email)
-            {
-                EnableStoresToUseServerEmailSettings = !_policiesSettings.DisableStoresToUseServerEmailSettings
-            };
-            return View(vm);
-        }
-
-        [HttpPost("server/emails")]
-        public async Task<IActionResult> Emails(ServerEmailsViewModel model, string command)
-        {
-            if (command == "Test")
-            {
-                try
-                {
-                    if (model.PasswordSet)
-                    {
-                        var settings = await _emailSenderFactory.GetSettings() ?? new EmailSettings();
-                        model.Settings.Password = settings.Password;
-                    }
-                    model.Settings.Validate("Settings.", ModelState);
-                    if (string.IsNullOrEmpty(model.TestEmail))
-                        ModelState.AddModelError(nameof(model.TestEmail), new RequiredAttribute().FormatErrorMessage(nameof(model.TestEmail)));
-                    if (!ModelState.IsValid)
-                        return View(model);
-                    var serverSettings = await _SettingsRepository.GetSettingAsync<ServerSettings>();
-                    var serverName = string.IsNullOrEmpty(serverSettings?.ServerName) ? "BTCPay Server" : serverSettings.ServerName;
-                    using (var client = await model.Settings.CreateSmtpClient())
-                    using (var message = model.Settings.CreateMailMessage(MailboxAddress.Parse(model.TestEmail), $"{serverName}: Email test", "You received it, the BTCPay Server SMTP settings work.", false))
-                    {
-                        await client.SendAsync(message);
-                        await client.DisconnectAsync(true);
-                    }
-                    TempData[WellKnownTempData.SuccessMessage] = StringLocalizer["Email sent to {0}. Please verify you received it.", model.TestEmail].Value;
-                }
-                catch (Exception ex)
-                {
-                    TempData[WellKnownTempData.ErrorMessage] = ex.Message;
-                }
-                return View(model);
-            }
-
-            if (_policiesSettings.DisableStoresToUseServerEmailSettings == model.EnableStoresToUseServerEmailSettings)
-            {
-                _policiesSettings.DisableStoresToUseServerEmailSettings = !model.EnableStoresToUseServerEmailSettings;
-                await _SettingsRepository.UpdateSetting(_policiesSettings);
-            }
-
-            if (command == "ResetPassword")
-            {
-                var settings = await _SettingsRepository.GetSettingAsync<EmailSettings>() ?? new EmailSettings();
-                settings.Password = null;
-                await _SettingsRepository.UpdateSetting(settings);
-                TempData[WellKnownTempData.SuccessMessage] = StringLocalizer["Email server password reset"].Value;
-                return RedirectToAction(nameof(Emails));
-            }
-
-            // save if user provided valid email; this will also clear settings if no model.Settings.From
-            if (model.Settings.From is not null && !MailboxAddressValidator.IsMailboxAddress(model.Settings.From))
-            {
-                ModelState.AddModelError("Settings.From", StringLocalizer["Invalid email"]);
-                return View(model);
-            }
-            var oldSettings = await _emailSenderFactory.GetSettings() ?? new EmailSettings();
-            if (!string.IsNullOrEmpty(oldSettings.Password))
-                model.Settings.Password = oldSettings.Password;
-
-            await _SettingsRepository.UpdateSetting(model.Settings);
-            TempData[WellKnownTempData.SuccessMessage] = StringLocalizer["Email settings saved"].Value;
-            return RedirectToAction(nameof(Emails));
         }
 
         [Route("server/logs/{file?}")]

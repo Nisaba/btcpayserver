@@ -13,6 +13,7 @@ using BTCPayServer.Logging;
 using BTCPayServer.PaymentRequest;
 using BTCPayServer.Plugins;
 using BTCPayServer.Security;
+using BTCPayServer.Services;
 using BTCPayServer.Services.Apps;
 using BTCPayServer.Storage;
 using Fido2NetLib;
@@ -44,16 +45,14 @@ namespace BTCPayServer.Hosting
 {
     public class Startup
     {
-        public Startup(IConfiguration conf, IWebHostEnvironment env, ILoggerFactory loggerFactory)
+        public Startup(IConfiguration conf, ILoggerFactory loggerFactory)
         {
             Configuration = conf;
-            _Env = env;
             LoggerFactory = loggerFactory;
             Logs = new Logs();
             Logs.Configure(loggerFactory);
         }
 
-        readonly IWebHostEnvironment _Env;
         public IConfiguration Configuration
         {
             get; set;
@@ -87,6 +86,9 @@ namespace BTCPayServer.Hosting
             services.AddDataProtection()
                 .SetApplicationName("BTCPay Server")
                 .PersistKeysToFileSystem(new DirectoryInfo(new DataDirectories().Configure(Configuration).DataDir));
+
+            services.AddScoped<ISecurityStampValidator, BTCPayServerSecurityStampValidator>();
+            services.AddSingleton<BTCPayServerSecurityStampValidator.DisabledUsers>();
             services.AddIdentity<ApplicationUser, IdentityRole>()
                 .AddEntityFrameworkStores<ApplicationDbContext>()
                 .AddDefaultTokenProviders()
@@ -99,12 +101,6 @@ namespace BTCPayServer.Hosting
                 opts.DefaultScheme = IdentityConstants.ApplicationScheme;
                 opts.DefaultSignInScheme = null;
                 opts.DefaultSignOutScheme = null;
-            });
-            services.PostConfigure<CookieAuthenticationOptions>(IdentityConstants.ApplicationScheme, opt =>
-            {
-                opt.LoginPath = "/login";
-                opt.AccessDeniedPath = "/errors/403";
-                opt.LogoutPath = "/logout";
             });
 
             services.Configure<SecurityStampValidatorOptions>(opts =>
@@ -168,6 +164,13 @@ namespace BTCPayServer.Hosting
                 // /Components/{View Component Name}/{View Name}.cshtml
                 o.ViewLocationFormats.Add("/{0}.cshtml");
                 o.PageViewLocationFormats.Add("/{0}.cshtml");
+
+                // Allows the use of Area for plugins
+                o.AreaViewLocationFormats.Add("/Plugins/{2}/Views/{1}/{0}.cshtml");
+                o.AreaViewLocationFormats.Add("/Plugins/{2}/Views/{0}.cshtml");
+                o.AreaViewLocationFormats.Add("/Plugins/{2}/Views/Shared/{0}.cshtml");
+
+                o.AreaViewLocationFormats.Add("/{0}.cshtml");
             })
             .AddNewtonsoftJson()
             .AddPlugins(services, Configuration, LoggerFactory, bootstrapServiceProvider)

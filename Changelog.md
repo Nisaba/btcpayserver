@@ -1,5 +1,50 @@
 # Changelog
 
+## 2.3.0
+
+### New features
+
+* Subscriptions: Allow merchants to accept recurring payments from customers. (#6922) @NicolasDorier
+* Greenfield: Subscriptions API (#7022) @NicolasDorier
+* Report: Add payment requests reports (#7015) @thgO-O @rockstardev
+* Add better filtering capabilities to in the payment requests list (#7015) @thgO-O @rockstardev
+* Ambassadors can monetize access to their server. (#6986) @NicolasDorier
+* Ability to install [language packs](https://github.com/btcpayserver/btcpayserver-translator/tree/main/translations) for the backend UI. (#6943) @Abhijay007
+* Email rules
+    * Add a `Condition` field to allow more complex conditions for triggering emails. (#7016) @NicolasDorier
+    * Add documentation for the various allowed placeholders. (#7016) @NicolasDorier
+    * Add `CC` and `BCC` fields. (#6979) @NicolasDorier
+    * The `Subject`, `To`, `CC`, and `BCC` fields now support placeholders. (#7016) @NicolasDorier
+* Add the concept of Server Email Rules
+    * Admins can customize the following server emails: `User: Password Reset Requested`, `User: Email Confirmation`, `User: Invitation`, `User: Account Approved`, `Admin: Approval Request`. (#6979) @NicolasDorier
+
+### Bug fixes
+
+* Fix: In Server Email, the rich text box (Summernote) was not saving changes in code view. (#6979) @NicolasDorier
+* Work around a browser bug where SVG icons stop displaying when served from cache. (#7003) @NicolasDorier
+* Fix: Denied 403 pages if denied access to the default store (#6976) @NicolasDorier
+* Fix: A wallet report was showing a negative balance change in green (#6974) @NicolasDorier
+* Log out users immediately when it is disabled (#6971) @NicolasDorier
+* Fix: Unable to reset email settings (#6963) @NicolasDorier
+* Fix: Unable to copy fiat amount in Invoice Checkout (#6933 #7036) @rockstardev
+
+### Improvements
+
+* Hide the wallet creation option when permissions are disabled. @rockstardev
+* Improve the error message for invalid PSBTs in “Sign with Seed”. (#6920) @NicolasDorier
+* Periodically clean up expired invoices, checkout plans, and portal sessions from the database. (#7018) @NicolasDorier
+
+## 2.2.1
+
+### Bug fixes
+
+* Fix: Updating store settings would silently fail where there was a validation issue @NicolasDorier
+* Fix: Ensure unlisted installed plugins appear as updatable (#6896 #6893) @thgO-O
+* Fix: Icon spacing issues in multiple UI components (#6886 #6880) @bc1cindy
+* Fix: In Wallet Send page, coin selection would unexpectedly also clear labels (#6885 #6883 #6676) @thgO-O
+* Fix: Periodic tasks would sometimes stop firing (#6898) @NicolasDorier
+* Fix: Date column header isn't aligned properly (#6914) @NicolasDorier
+
 ## 2.2.0
 
 We recommend updating NBXplorer to version `2.5.28` to take full advantage of the features in this release.

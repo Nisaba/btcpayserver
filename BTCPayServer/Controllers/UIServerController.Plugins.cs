@@ -26,12 +26,12 @@ namespace BTCPayServer.Controllers
             {
                 availablePlugins = await pluginService.GetRemotePlugins(search);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 TempData.SetStatusMessageModel(new StatusMessageModel
                 {
                     Severity = StatusMessageModel.StatusSeverity.Error,
-                    Message = StringLocalizer["Remote plugins lookup failed. Try again later."].Value
+                    Message = StringLocalizer["Remote plugins lookup failed. Try again later. Error: {0}", ex.Message].Value
                 });
                 availablePlugins = Array.Empty<PluginService.AvailablePlugin>();
             }
@@ -80,6 +80,20 @@ namespace BTCPayServer.Controllers
             TempData.SetStatusMessageModel(new StatusMessageModel
             {
                 Message = StringLocalizer["Plugin scheduled to be uninstalled."].Value,
+                Severity = StatusMessageModel.StatusSeverity.Success
+            });
+
+            return RedirectToAction("ListPlugins");
+        }
+
+        [HttpPost("server/plugins/enable")]
+        public IActionResult EnablePlugin(
+            [FromServices] PluginService pluginService, string plugin)
+        {
+            pluginService.EnablePlugin(plugin);
+            TempData.SetStatusMessageModel(new StatusMessageModel
+            {
+                Message = StringLocalizer["Plugin scheduled to be enabled."].Value,
                 Severity = StatusMessageModel.StatusSeverity.Success
             });
 
