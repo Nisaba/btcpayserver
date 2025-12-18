@@ -307,3 +307,7 @@ BTCPayServer.Tests/monero_wallet
 /BTCPayServer/wwwroot/vendor/summernote/summernote-bs5.js
 /BTCPayServer/wwwroot/vendor/summernote/summernote-bs5.js.map
 /btcpayserver.sln
+/wwwroot/js/b2p-swap.js
+/.gitignore
+/.gitignore
+/.gitignore
