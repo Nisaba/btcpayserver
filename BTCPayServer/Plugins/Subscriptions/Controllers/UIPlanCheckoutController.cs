@@ -15,7 +15,6 @@ namespace BTCPayServer.Plugins.Subscriptions.Controllers;
 
 
 [AllowAnonymous]
-[AutoValidateAntiforgeryToken]
 [Area(SubscriptionsPlugin.Area)]
 [Route("plan-checkout/{checkoutId}")]
 public class UIPlanCheckoutController(
@@ -41,7 +40,7 @@ public class UIPlanCheckoutController(
             prefilledEmail = checkout.NewSubscriberEmail;
         var vm = new PlanCheckoutViewModel()
         {
-            Id = plan.Id,
+            CheckoutId = checkoutId,
             StoreBranding = await StoreBrandingViewModel.CreateAsync(Request, uriResolver, plan.Offering.App.StoreData.GetStoreBlob()),
             StoreName = plan.Offering.App.StoreData.StoreName,
             Title = plan.Name,
